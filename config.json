@@ -1,0 +1,8 @@
+{
+  "src": "127.0.0.1:8080",
+  "dst": "127.0.0.1:8081",
+  "psk": "4UMBnMd7QHB6JEPlcK8WBA==",
+  "aad1": "wSVJILsHvM8Z8JESNwZE8g==",
+  "aad2": "sETIswHuqDikAJQcjpXmWA==",
+  "client": false
+}
