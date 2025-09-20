@@ -7,6 +7,7 @@ import (
 	"log"
 	"net"
 	"os"
+	"sync"
 )
 
 type Config struct {
@@ -132,8 +133,20 @@ func runClient(src string, dst string) {
 			log.Printf("Receved chacha nonce: %d\n", len(chachaNonce))
 
 			log.Printf("Deriving key, salt: %d\n", len(salt))
-			finalKey := deriveArgon2id32FromPSK(config.PSK, salt)
-			log.Printf("Derived final key: %d\n", len(finalKey))
+			rootKey := deriveArgon2id32FromPSK(config.PSK, salt)
+			log.Printf("Derived root key: %d\n", len(rootKey))
+
+			activeKey := deriveChildKey(rootKey, 1_000_000)
+			log.Printf("Derived initial child key: %d\n", len(activeKey))
+
+			var sendPacketCount int
+			var recvPacketCount int
+			var sendKeyMutex sync.Mutex
+			var recvKeyMutex sync.Mutex
+			sendActiveKey := make([]byte, len(activeKey))
+			recvActiveKey := make([]byte, len(activeKey))
+			copy(sendActiveKey, activeKey)
+			copy(recvActiveKey, activeKey)
 
 			// server -> client
 			go func() {
@@ -154,7 +167,17 @@ func runClient(src string, dst string) {
 
 					buf = nil
 
-					err = SendEncryptedFrame(encRemoteConn, b, finalKey, chachaNonce, config.AAD2)
+					sendKeyMutex.Lock()
+					err = SendEncryptedFrame(encRemoteConn, b, sendActiveKey, chachaNonce, config.AAD2)
+					sendPacketCount++
+
+					// Rotate key every 50 packets
+					if sendPacketCount%50 == 0 {
+						sendActiveKey = deriveChildKey(sendActiveKey, 50_000)
+						log.Printf("Rotated send key after %d packets\n", sendPacketCount)
+					}
+					sendKeyMutex.Unlock()
+
 					if err != nil {
 						plainClientConn.Close()
 						encRemoteConn.Close()
@@ -166,7 +189,16 @@ func runClient(src string, dst string) {
 			// client -> server
 			go func() {
 				for {
-					data, err := ReceiveEncryptedFrame(encRemoteConn, -1, finalKey, config.AAD2)
+					recvKeyMutex.Lock()
+					data, err := ReceiveEncryptedFrame(encRemoteConn, -1, recvActiveKey, config.AAD2)
+					recvPacketCount++
+
+					// Rotate key every 50 packets
+					if recvPacketCount%50 == 0 {
+						recvActiveKey = deriveChildKey(recvActiveKey, 50_000)
+						log.Printf("Rotated recv key after %d packets\n", recvPacketCount)
+					}
+					recvKeyMutex.Unlock()
 
 					if err != nil {
 						plainClientConn.Close()
@@ -315,8 +347,20 @@ func runServer(src string, dst string) {
 			}
 
 			log.Printf("Deriving key, salt: %d\n", len(salt))
-			finalKey := deriveArgon2id32FromPSK(config.PSK, salt)
-			log.Printf("Derived final key: %d\n", len(finalKey))
+			rootKey := deriveArgon2id32FromPSK(config.PSK, salt)
+			log.Printf("Derived root key: %d\n", len(rootKey))
+
+			activeKey := deriveChildKey(rootKey, 1_000_000)
+			log.Printf("Derived initial child key: %d\n", len(activeKey))
+
+			var sendPacketCount int
+			var recvPacketCount int
+			var sendKeyMutex sync.Mutex
+			var recvKeyMutex sync.Mutex
+			sendActiveKey := make([]byte, len(activeKey))
+			recvActiveKey := make([]byte, len(activeKey))
+			copy(sendActiveKey, activeKey)
+			copy(recvActiveKey, activeKey)
 
 			// server -> client
 			go func() {
@@ -337,7 +381,17 @@ func runServer(src string, dst string) {
 
 					buf = nil
 
-					err = SendEncryptedFrame(encClientConn, b, finalKey, chachaNonce, config.AAD2)
+					sendKeyMutex.Lock()
+					err = SendEncryptedFrame(encClientConn, b, sendActiveKey, chachaNonce, config.AAD2)
+					sendPacketCount++
+
+					// Rotate key every 50 packets
+					if sendPacketCount%50 == 0 {
+						sendActiveKey = deriveChildKey(sendActiveKey, 50_000)
+						log.Printf("Rotated send key after %d packets\n", sendPacketCount)
+					}
+					sendKeyMutex.Unlock()
+
 					if err != nil {
 						plainRemoteConn.Close()
 						encClientConn.Close()
@@ -349,7 +403,16 @@ func runServer(src string, dst string) {
 			// client -> server
 			go func() {
 				for {
-					data, err := ReceiveEncryptedFrame(encClientConn, -1, finalKey, config.AAD2)
+					recvKeyMutex.Lock()
+					data, err := ReceiveEncryptedFrame(encClientConn, -1, recvActiveKey, config.AAD2)
+					recvPacketCount++
+
+					// Rotate key every 50 packets
+					if recvPacketCount%50 == 0 {
+						recvActiveKey = deriveChildKey(recvActiveKey, 50_000)
+						log.Printf("Rotated recv key after %d packets\n", recvPacketCount)
+					}
+					recvKeyMutex.Unlock()
 
 					if err != nil {
 						plainRemoteConn.Close()
