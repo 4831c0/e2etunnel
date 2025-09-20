@@ -1,3 +1,6 @@
 .idea
 e2etunnel
 tmp
+
+*.json
+*.sh
